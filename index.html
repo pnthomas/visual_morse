@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Visual Morse Code Trainer</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: #080e0a;
+  color: #6aaa8a;
+  font-family: 'Courier New', monospace;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+  padding: 12px 16px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+header {
+  display: flex;
+  gap: 80px;
+  font-size: 1.3rem;
+  letter-spacing: 0.45em;
+  color: #7ad6b1;
+  margin-bottom: 4px;
+}
+
+/* ── Practice word display ─────────────────────────────────── */
+#practice-wrap {
+  min-height: 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+#practice-label {
+  font-size: 0.65rem;
+  letter-spacing: 0.25em;
+  color: #2a4a3a;
+}
+#practice-word {
+  display: flex;
+  gap: 6px;
+}
+.pc {
+  width: 36px; height: 36px;
+  border: 1.5px solid #1f3f2f;
+  border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.4rem; font-weight: bold;
+  color: #2a4a3a;
+  background: #0a150e;
+  transition: color 0.2s, border-color 0.2s, background 0.2s, box-shadow 0.2s;
+}
+.pc.done {
+  color: #00eb75;
+  border-color: #00eb75;
+  background: #0a2416;
+  box-shadow: 0 0 8px #00eb7560;
+}
+.pc.current {
+  color: #00eb75;
+  border-color: #00eb75;
+  background: #0c2b1a;
+  box-shadow: 0 0 14px #00eb75aa;
+  animation: pulse-border 0.8s ease-in-out infinite alternate;
+}
+@keyframes pulse-border {
+  from { box-shadow: 0 0 8px #00eb7560; }
+  to   { box-shadow: 0 0 20px #00eb75cc; }
+}
+
+/* ── Letter + symbols ──────────────────────────────────────── */
+#letter-display {
+  font-size: 5rem;
+  font-weight: bold;
+  color: #00ff9a;
+  text-shadow: 0 0 30px #00ff9a, 0 0 60px #00cc66;
+  min-height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: 0.1em;
+  transition: color 0.15s, text-shadow 0.15s;
+}
+#letter-display.error {
+  color: #ff5555;
+  text-shadow: 0 0 30px #ff3333, 0 0 60px #aa1111;
+}
+#symbols-display {
+  font-size: 1.6rem;
+  min-height: 36px;
+  color: #00eb75;
+  letter-spacing: 0.6em;
+  margin-bottom: 6px;
+}
+
+/* ── Key press bar ─────────────────────────────────────────── */
+#key-indicator {
+  width: 120px; height: 8px;
+  background: #0c2415;
+  border: 1px solid #1f4428;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+#key-bar {
+  height: 100%; width: 0%;
+  background: #00eb75;
+  border-radius: 4px;
+  transition: background 0.08s;
+}
+#key-bar.dah { background: #1aadff; }
+
+/* ── Controls ──────────────────────────────────────────────── */
+#controls {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+button {
+  font-family: 'Courier New', monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.15em;
+  padding: 5px 14px;
+  background: #0c2415;
+  border: 1.5px solid #1f4428;
+  border-radius: 4px;
+  color: #4a8060;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+button:hover        { background: #122e1c; color: #00eb75; border-color: #00eb7580; }
+button.active-btn   { background: #0c2b1a; color: #00eb75; border-color: #00eb75; }
+
+/* ── SVG tree ──────────────────────────────────────────────── */
+#tree-wrap { width: 100%; max-width: 960px; }
+svg { width: 100%; height: auto; }
+
+/* ── Hint ──────────────────────────────────────────────────── */
+#hint {
+  margin-top: 8px;
+  font-size: 0.72rem;
+  color: #2a4030;
+  text-align: center;
+  line-height: 1.6;
+}
+</style>
+</head>
+<body>
+
+<header><span>MORSE</span><span>CODE</span></header>
+
+<div id="practice-wrap">
+  <div id="practice-label"></div>
+  <div id="practice-word"></div>
+</div>
+
+<div id="letter-display"></div>
+<div id="symbols-display"></div>
+<div id="key-indicator"><div id="key-bar"></div></div>
+
+<div id="controls">
+  <button id="btn-practice">PRACTICE MODE</button>
+</div>
+
+<div id="tree-wrap">
+  <svg id="svg" viewBox="0 0 960 490" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <filter id="fg" x="-60%" y="-60%" width="220%" height="220%">
+        <feGaussianBlur stdDeviation="4" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <filter id="fb" x="-60%" y="-60%" width="220%" height="220%">
+        <feGaussianBlur stdDeviation="4" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <filter id="fr" x="-60%" y="-60%" width="220%" height="220%">
+        <feGaussianBlur stdDeviation="4" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+    </defs>
+  </svg>
+</div>
+
+<div id="hint">
+  TAP space = DIT (·) &nbsp;|&nbsp; HOLD space = DAH (—) &nbsp;|&nbsp; threshold 150 ms &nbsp;|&nbsp; tap anywhere on mobile<br>
+  1.5 s silence confirms letter &nbsp;|&nbsp; dead-end or timeout at non-letter = error &amp; reset
+</div>
+
+<script>
+// ── Audio ─────────────────────────────────────────────────────────────────────
+
+let audioCtx = null;
+let currentTone = null;
+
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function makeClick(vol = 0.18) {
+  // Very short broadband transient — mechanical key contact sound
+  const len  = Math.floor(audioCtx.sampleRate * 0.014);
+  const buf  = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) {
+    // Pink-ish noise with fast exponential decay
+    data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (len * 0.18));
+  }
+  const src  = audioCtx.createBufferSource();
+  src.buffer = buf;
+  // Band-pass centered ~1.4 kHz to taste like a brass contact click
+  const bp   = audioCtx.createBiquadFilter();
+  bp.type    = 'bandpass';
+  bp.frequency.value = 1400;
+  bp.Q.value = 0.7;
+  const gain = audioCtx.createGain();
+  gain.gain.value = vol;
+  src.connect(bp); bp.connect(gain); gain.connect(audioCtx.destination);
+  src.start();
+}
+
+function startKeyTone() {
+  ensureAudio();
+  makeClick(0.20);
+  // 650 Hz sine — classic straight-key sidetone pitch
+  const osc  = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type   = 'sine';
+  osc.frequency.value = 650;
+  gain.gain.setValueAtTime(0, audioCtx.currentTime);
+  gain.gain.linearRampToValueAtTime(0.28, audioCtx.currentTime + 0.006);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  currentTone = { osc, gain };
+}
+
+function stopKeyTone() {
+  if (!audioCtx) return;
+  if (currentTone) {
+    const { osc, gain } = currentTone;
+    const now = audioCtx.currentTime;
+    gain.gain.setValueAtTime(gain.gain.value, now);
+    gain.gain.linearRampToValueAtTime(0, now + 0.007);
+    osc.stop(now + 0.012);
+    currentTone = null;
+  }
+  makeClick(0.13);
+}
+
+function playWordComplete() {
+  ensureAudio();
+  // Two ascending soft sine tones — neutral but satisfying
+  const now = audioCtx.currentTime;
+  [820, 1080].forEach((freq, i) => {
+    const osc  = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type   = 'sine';
+    osc.frequency.value = freq;
+    const t    = now + i * 0.09;
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.18, t + 0.007);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.11);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(t);
+    osc.stop(t + 0.12);
+  });
+}
+
+function playLetterOk() {
+  ensureAudio();
+  const now  = audioCtx.currentTime;
+  const osc  = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type   = 'sine';
+  osc.frequency.value = 750;
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(0.13, now + 0.005);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(now);
+  osc.stop(now + 0.10);
+}
+
+// ── Morse tree ────────────────────────────────────────────────────────────────
+
+function N(letter, dash, dot) { return { letter, dash, dot }; }
+
+const ROOT = N(null,
+  N('T',
+    N('M',
+      N('O', null, null),
+      N('G', N('Q', null, null), N('Z', null, null))
+    ),
+    N('N',
+      N('K', N('Y', null, null), N('C', null, null)),
+      N('D', N('X', null, null), N('B', null, null))
+    )
+  ),
+  N('E',
+    N('A',
+      N('W', N('J', null, null), N('P', null, null)),
+      N('R', null,               N('L', null, null))
+    ),
+    N('I',
+      N('U', null,               N('F', null, null)),
+      N('S', N('V', null, null), N('H', null, null))
+    )
+  )
+);
+
+// ── Layout ────────────────────────────────────────────────────────────────────
+
+const VW = 960, PAD = 22, TOP = 38, LEVEL_H = 94;
+
+function layout(n, depth, lx, rx, reachedBy) {
+  if (!n) return;
+  n.x = (lx + rx) / 2;
+  n.y = TOP + depth * LEVEL_H;
+  n.reachedBy = reachedBy;
+  const mid = (lx + rx) / 2;
+  layout(n.dash, depth + 1, lx,  mid, 'dash');
+  layout(n.dot,  depth + 1, mid, rx,  'dot');
+}
+layout(ROOT, 0, PAD, VW - PAD, null);
+
+// ── Collect nodes / edges ─────────────────────────────────────────────────────
+
+const allNodes = [], allEdges = [];
+
+function collect(n, parent, type) {
+  if (!n) return;
+  allNodes.push(n);
+  if (parent) {
+    const edge = { from: parent, to: n, type };
+    allEdges.push(edge);
+    n.parentEdge = edge;
+  } else {
+    n.parentEdge = null;
+  }
+  collect(n.dash, n, 'dash');
+  collect(n.dot,  n, 'dot');
+}
+collect(ROOT, null, null);
+
+// ── Letter lookup + path helper ───────────────────────────────────────────────
+
+const letterMap = {};
+(function buildMap(n) {
+  if (!n) return;
+  if (n.letter) letterMap[n.letter] = n;
+  buildMap(n.dash); buildMap(n.dot);
+})(ROOT);
+
+// Walk parentEdge links from a node back to ROOT; returns Sets of nodes+edges on that path.
+function pathToNode(node) {
+  const nodes = new Set(), edges = new Set();
+  let n = node;
+  while (n && n !== ROOT) {
+    nodes.add(n);
+    if (n.parentEdge) { edges.add(n.parentEdge); n = n.parentEdge.from; }
+    else break;
+  }
+  return { nodes, edges };
+}
+
+// ── SVG helpers ───────────────────────────────────────────────────────────────
+
+const svg = document.getElementById('svg');
+const NS  = 'http://www.w3.org/2000/svg';
+
+function svgEl(tag, attrs) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  return e;
+}
+
+// ── Draw edges ────────────────────────────────────────────────────────────────
+// Colors (+15% brightness vs original)
+// Dim edge: #172817 → #1d3520
+// Dim dash stroke: #1a2e44 → #21395a   Dim dot stroke: #183028 → #1d3b30
+// Dim dash fill: #0c1824 → #0e2030     Dim dot fill: #0a1c10 → #0c2213
+
+for (const edge of allEdges) {
+  const line = svgEl('line', {
+    x1: edge.from.x, y1: edge.from.y,
+    x2: edge.to.x,   y2: edge.to.y,
+    stroke: '#1d3520', 'stroke-width': 2, 'stroke-linecap': 'round'
+  });
+  edge.lineEl = line;
+  svg.appendChild(line);
+
+  const mx = (edge.from.x + edge.to.x) / 2;
+  const my = (edge.from.y + edge.to.y) / 2;
+
+  if (edge.type === 'dash') {
+    const ang = Math.atan2(edge.to.y - edge.from.y, edge.to.x - edge.from.x) * 180 / Math.PI;
+    const r = svgEl('rect', {
+      x: mx - 10, y: my - 4, width: 20, height: 8, rx: 2,
+      fill: '#0e2030', stroke: '#21395a', 'stroke-width': 1.5,
+      transform: `rotate(${ang},${mx},${my})`
+    });
+    edge.markerEl = r;
+    svg.appendChild(r);
+  } else {
+    const c = svgEl('circle', {
+      cx: mx, cy: my, r: 5,
+      fill: '#0c2213', stroke: '#1d3b30', 'stroke-width': 1.5
+    });
+    edge.markerEl = c;
+    svg.appendChild(c);
+  }
+}
+
+// ── Draw nodes ────────────────────────────────────────────────────────────────
+
+for (const n of allNodes) {
+  if (n === ROOT) {
+    const g = document.createElementNS(NS, 'g');
+    g.appendChild(svgEl('polygon', {
+      points: `${n.x},${n.y + 10} ${n.x - 11},${n.y - 8} ${n.x + 11},${n.y - 8}`,
+      fill: 'none', stroke: '#57926a', 'stroke-width': 2.5
+    }));
+    g.appendChild(svgEl('line', {
+      x1: n.x, y1: n.y + 10, x2: n.x, y2: n.y + 18,
+      stroke: '#57926a', 'stroke-width': 2.5
+    }));
+    n.shapeEl = g;
+    svg.appendChild(g);
+    continue;
+  }
+
+  let shape;
+  if (n.reachedBy === 'dash') {
+    shape = svgEl('rect', {
+      x: n.x - 14, y: n.y - 8, width: 28, height: 16, rx: 3,
+      fill: '#0e2030', stroke: '#21395a', 'stroke-width': 2
+    });
+  } else {
+    shape = svgEl('circle', {
+      cx: n.x, cy: n.y, r: 12,
+      fill: '#0c2213', stroke: '#1d3b30', 'stroke-width': 2
+    });
+  }
+  n.shapeEl = shape;
+  svg.appendChild(shape);
+
+  if (n.letter) {
+    const txt = svgEl('text', {
+      x: n.x, y: n.y,
+      'text-anchor': 'middle', 'dominant-baseline': 'middle',
+      'font-family': 'Courier New, monospace',
+      'font-size': '11', 'font-weight': 'bold',
+      fill: '#4a8060', 'pointer-events': 'none'
+    });
+    txt.textContent = n.letter;
+    n.textEl = txt;
+    svg.appendChild(txt);
+  }
+}
+
+// ── Highlight ─────────────────────────────────────────────────────────────────
+
+// Active colors +15%: dot #00cc66→#00eb75, dash #0099ff→#1aadff
+const COLORS = {
+  dot:  { active: '#00eb75', dimFill: '#0c2213', dimStroke: '#1d3b30', activeFill: '#0c2b1a', filter: 'url(#fg)' },
+  dash: { active: '#1aadff', dimFill: '#0e2030', dimStroke: '#21395a', activeFill: '#0c2341', filter: 'url(#fb)' },
+  err:  { active: '#ff5555', filter: 'url(#fr)' }
+};
+
+// Target sets: path to the current practice letter (populated by setTargetHighlight)
+let targetNodeSet = new Set();
+let targetEdgeSet = new Set();
+
+function applyHighlight(nodeSet, edgeSet, mode) {
+  for (const n of allNodes) {
+    if (n === ROOT) continue;
+    const isActive = nodeSet.has(n);
+    const isTarget = !isActive && targetNodeSet.has(n);
+    const col = COLORS[n.reachedBy];
+    if (n.shapeEl) {
+      if (isActive && mode === 'normal') {
+        n.shapeEl.setAttribute('fill',    col.activeFill);
+        n.shapeEl.setAttribute('stroke',  col.active);
+        n.shapeEl.setAttribute('filter',  col.filter);
+        n.shapeEl.removeAttribute('opacity');
+      } else if (isActive && mode === 'error') {
+        n.shapeEl.setAttribute('fill',    '#240a0a');
+        n.shapeEl.setAttribute('stroke',  COLORS.err.active);
+        n.shapeEl.setAttribute('filter',  COLORS.err.filter);
+        n.shapeEl.removeAttribute('opacity');
+      } else if (isTarget) {
+        n.shapeEl.setAttribute('fill',    col.dimFill);
+        n.shapeEl.setAttribute('stroke',  col.active);
+        n.shapeEl.setAttribute('filter',  col.filter);
+        n.shapeEl.setAttribute('opacity', '0.45');
+      } else {
+        n.shapeEl.setAttribute('fill',    col.dimFill);
+        n.shapeEl.setAttribute('stroke',  col.dimStroke);
+        n.shapeEl.removeAttribute('filter');
+        n.shapeEl.removeAttribute('opacity');
+      }
+    }
+    if (n.textEl) {
+      if (isActive && mode === 'normal')  { n.textEl.setAttribute('fill', col.active);         n.textEl.removeAttribute('opacity'); }
+      else if (isActive && mode === 'error') { n.textEl.setAttribute('fill', COLORS.err.active); n.textEl.removeAttribute('opacity'); }
+      else if (isTarget)                  { n.textEl.setAttribute('fill', col.active);         n.textEl.setAttribute('opacity', '0.55'); }
+      else                                { n.textEl.setAttribute('fill', '#4a8060');           n.textEl.removeAttribute('opacity'); }
+    }
+  }
+  for (const e of allEdges) {
+    const isActive = edgeSet.has(e);
+    const isTarget = !isActive && targetEdgeSet.has(e);
+    const col = COLORS[e.type];
+    if (e.lineEl) {
+      if (isActive && mode !== 'clear') {
+        e.lineEl.setAttribute('stroke',       mode === 'error' ? COLORS.err.active : col.active);
+        e.lineEl.setAttribute('stroke-width', 3);
+        e.lineEl.setAttribute('filter',       mode === 'error' ? COLORS.err.filter : col.filter);
+        e.lineEl.removeAttribute('opacity');
+      } else if (isTarget) {
+        e.lineEl.setAttribute('stroke',       col.active);
+        e.lineEl.setAttribute('stroke-width', 2.5);
+        e.lineEl.setAttribute('filter',       col.filter);
+        e.lineEl.setAttribute('opacity',      '0.4');
+      } else {
+        e.lineEl.setAttribute('stroke',       '#1d3520');
+        e.lineEl.setAttribute('stroke-width', 2);
+        e.lineEl.removeAttribute('filter');
+        e.lineEl.removeAttribute('opacity');
+      }
+    }
+    if (e.markerEl) {
+      const isDash = e.type === 'dash';
+      if (isActive && mode !== 'clear') {
+        e.markerEl.setAttribute('fill',    mode === 'error' ? '#240a0a' : col.activeFill);
+        e.markerEl.setAttribute('stroke',  mode === 'error' ? COLORS.err.active : col.active);
+        e.markerEl.removeAttribute('opacity');
+      } else if (isTarget) {
+        e.markerEl.setAttribute('fill',    col.dimFill);
+        e.markerEl.setAttribute('stroke',  col.active);
+        e.markerEl.setAttribute('opacity', '0.45');
+      } else {
+        e.markerEl.setAttribute('fill',    isDash ? '#0e2030' : '#0c2213');
+        e.markerEl.setAttribute('stroke',  isDash ? '#21395a' : '#1d3b30');
+        e.markerEl.removeAttribute('opacity');
+      }
+    }
+  }
+}
+
+// ── Practice mode ─────────────────────────────────────────────────────────────
+
+const PRACTICE_WORDS = [
+  'CQ','DE','ES','AR','SK','TU','BK','KN','FB','OM','YL','DX','UR','HR','HW',
+  'QSO','QRZ','QTH','QRM','RST','PSE','AGN','ANT','RIG','WX','GUD','NR','VY','QRP'
+];
+
+function shuffled(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+let practiceOn      = false;
+let practiceList    = [];
+let practiceWordIdx = 0;
+let practiceCharIdx = 0;
+
+const practiceLabel = document.getElementById('practice-label');
+const practiceWordEl = document.getElementById('practice-word');
+
+function currentWord() { return practiceList[practiceWordIdx % practiceList.length]; }
+
+function setTargetHighlight() {
+  if (!practiceOn) { targetNodeSet = new Set(); targetEdgeSet = new Set(); return; }
+  const ch = currentWord()[practiceCharIdx];
+  const node = ch && letterMap[ch];
+  if (!node) { targetNodeSet = new Set(); targetEdgeSet = new Set(); return; }
+  const p = pathToNode(node);
+  targetNodeSet = p.nodes;
+  targetEdgeSet = p.edges;
+}
+
+function renderPractice() {
+  if (!practiceOn) {
+    practiceLabel.textContent = '';
+    practiceWordEl.innerHTML  = '';
+    targetNodeSet = new Set();
+    targetEdgeSet = new Set();
+    return;
+  }
+  practiceLabel.textContent = 'SEND THIS WORD';
+  const word = currentWord();
+  practiceWordEl.innerHTML = word.split('').map((ch, i) => {
+    const cls = i < practiceCharIdx ? 'pc done' : i === practiceCharIdx ? 'pc current' : 'pc';
+    return `<span class="${cls}">${ch}</span>`;
+  }).join('');
+  setTargetHighlight();
+  applyHighlight(pathNodes, pathEdges, 'normal');
+}
+
+function advanceWordIfDone() {
+  const word = currentWord();
+  if (practiceCharIdx >= word.length) {
+    playWordComplete();
+    renderPractice();
+    setTimeout(() => {
+      practiceWordIdx++;
+      if (practiceWordIdx >= practiceList.length) {
+        practiceList    = shuffled(PRACTICE_WORDS);
+        practiceWordIdx = 0;
+      }
+      practiceCharIdx = 0;
+      reset();
+      renderPractice();
+    }, 1200);
+    return true;
+  }
+  return false;
+}
+
+// ── App state ─────────────────────────────────────────────────────────────────
+
+let current    = ROOT;
+let pathNodes  = new Set([ROOT]);
+let pathEdges  = new Set();
+let symbols    = [];
+let resetTimer = null;
+let keyDown    = false;
+let keyDownAt  = 0;
+let barAnim    = null;
+
+// 150 ms threshold ≈ calibrated for ~8 WPM practice speed
+// (FCC last required 5 WPM; at 5 WPM a dit = 240 ms; 150 ms threshold gives
+//  comfortable headroom while keeping dah feel distinct)
+const DIT_MS   = 150;
+const RESET_MS = 1500;
+
+const letterEl  = document.getElementById('letter-display');
+const symbolsEl = document.getElementById('symbols-display');
+const keyBar    = document.getElementById('key-bar');
+
+function updateTree() {
+  if (current !== ROOT && current.letter) {
+    letterEl.textContent = current.letter;
+    letterEl.classList.remove('error');
+  } else if (current === ROOT) {
+    letterEl.textContent = '';
+    letterEl.classList.remove('error');
+  }
+  symbolsEl.textContent = symbols.join('\u202f');
+  applyHighlight(pathNodes, pathEdges, 'normal');
+}
+
+function navigate(dir) {
+  clearTimeout(resetTimer);
+  const next = current[dir];
+  if (!next) { showError(); return; }
+
+  current = next;
+  pathNodes.add(current);
+  if (current.parentEdge) pathEdges.add(current.parentEdge);
+  symbols.push(dir === 'dot' ? '·' : '—');
+
+  updateTree();
+
+  const isLeaf = !current.dash && !current.dot;
+  resetTimer = setTimeout(handleTimeout, isLeaf ? 1000 : RESET_MS);
+}
+
+function handleTimeout() {
+  if (current === ROOT) return;
+  if (!current.letter) { showError(); return; }
+
+  const letter = current.letter;
+
+  if (practiceOn) {
+    const expected = currentWord()[practiceCharIdx];
+    if (letter === expected) {
+      playLetterOk();
+      practiceCharIdx++;
+      letterEl.textContent    = letter;
+      letterEl.style.textShadow = '0 0 50px #00ff9a, 0 0 100px #00cc66';
+      renderPractice();
+      if (!advanceWordIfDone()) {
+        setTimeout(reset, 700);
+      }
+    } else {
+      showError();
+    }
+  } else {
+    letterEl.style.textShadow = '0 0 50px #00ff9a, 0 0 100px #00cc66';
+    setTimeout(reset, 1000);
+  }
+}
+
+function showError() {
+  clearTimeout(resetTimer);
+  letterEl.textContent = '?';
+  letterEl.classList.add('error');
+  applyHighlight(pathNodes, pathEdges, 'error');
+  setTimeout(reset, 700);
+}
+
+function reset() {
+  clearTimeout(resetTimer);
+  current   = ROOT;
+  pathNodes = new Set([ROOT]);
+  pathEdges = new Set();
+  symbols   = [];
+  letterEl.textContent = '';
+  letterEl.classList.remove('error');
+  letterEl.style.textShadow = '';
+  symbolsEl.textContent = '';
+  setTargetHighlight();
+  applyHighlight(new Set(), new Set(), 'normal');
+}
+
+// ── Key bar animation ─────────────────────────────────────────────────────────
+
+function startBar() {
+  keyBar.style.width = '0%';
+  keyBar.classList.remove('dah');
+  const start = Date.now();
+  barAnim = setInterval(() => {
+    const elapsed = Date.now() - start;
+    keyBar.style.width = Math.min(100, (elapsed / 600) * 100) + '%';
+    if (elapsed >= DIT_MS) keyBar.classList.add('dah');
+  }, 16);
+}
+
+function stopBar() {
+  clearInterval(barAnim);
+  barAnim = null;
+  setTimeout(() => { keyBar.style.width = '0%'; keyBar.classList.remove('dah'); }, 120);
+}
+
+// ── Keyboard ──────────────────────────────────────────────────────────────────
+
+document.addEventListener('keydown', e => {
+  if (e.code !== 'Space' || keyDown) return;
+  e.preventDefault();
+  keyDown   = true;
+  keyDownAt = Date.now();
+  startKeyTone();
+  startBar();
+});
+
+document.addEventListener('keyup', e => {
+  if (e.code !== 'Space' || !keyDown) return;
+  e.preventDefault();
+  keyDown = false;
+  stopKeyTone();
+  stopBar();
+  navigate(Date.now() - keyDownAt < DIT_MS ? 'dot' : 'dash');
+});
+
+// ── Touch ─────────────────────────────────────────────────────────────────────
+
+let touchAt = 0;
+document.addEventListener('touchstart', e => {
+  // Ignore taps on buttons
+  if (e.target.tagName === 'BUTTON') return;
+  e.preventDefault();
+  touchAt = Date.now();
+  startKeyTone();
+  startBar();
+}, { passive: false });
+
+document.addEventListener('touchend', e => {
+  if (e.target.tagName === 'BUTTON') return;
+  e.preventDefault();
+  stopKeyTone();
+  stopBar();
+  navigate(Date.now() - touchAt < DIT_MS ? 'dot' : 'dash');
+}, { passive: false });
+
+// ── Practice button ───────────────────────────────────────────────────────────
+
+document.getElementById('btn-practice').addEventListener('click', () => {
+  ensureAudio();
+  practiceOn = !practiceOn;
+  document.getElementById('btn-practice').classList.toggle('active-btn', practiceOn);
+  if (practiceOn) {
+    practiceList    = shuffled(PRACTICE_WORDS);
+    practiceWordIdx = 0;
+    practiceCharIdx = 0;
+  }
+  reset();
+  renderPractice();
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
+applyHighlight(new Set(), new Set(), 'clear');
+</script>
+</body>
+</html>
