@@ -291,6 +291,74 @@ function playLetterOk() {
   osc.stop(now + 0.10);
 }
 
+const MORSE_CODE = {
+  A:'.-',   B:'-...', C:'-.-.', D:'-..', E:'.', F:'..-.', G:'--.',
+  H:'....', I:'..',   J:'.---', K:'-.-', L:'.-..', M:'--', N:'-.',
+  O:'---',  P:'.--.', Q:'--.-', R:'.-.', S:'...', T:'-',  U:'..-',
+  V:'...-', W:'.--',  X:'-..-', Y:'-.--', Z:'--..'
+};
+
+// Play a perfect rendition of an entire word with proper inter-letter gaps, then callback.
+function playMorseWord(word, callback) {
+  ensureAudio();
+  const DIT = 0.050, DAH = 0.150, SYM_GAP = 0.050, LTR_GAP = 0.150, RAMP = 0.005;
+  let t = audioCtx.currentTime + 0.12;
+
+  for (let li = 0; li < word.length; li++) {
+    const code = MORSE_CODE[word[li]];
+    if (!code) continue;
+    for (const sym of code) {
+      const dur = sym === '.' ? DIT : DAH;
+      const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+      osc.type = 'sine'; osc.frequency.value = 650;
+      gain.gain.setValueAtTime(0,    t);
+      gain.gain.linearRampToValueAtTime(0.30, t + RAMP);
+      gain.gain.setValueAtTime(0.30, t + dur - RAMP);
+      gain.gain.linearRampToValueAtTime(0,    t + dur);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(t); osc.stop(t + dur + 0.01);
+      t += dur + SYM_GAP;
+    }
+    // Replace trailing sym-gap with a full inter-letter gap (3 dits)
+    if (li < word.length - 1) t += LTR_GAP - SYM_GAP;
+  }
+
+  setTimeout(callback, (t - audioCtx.currentTime + 0.06) * 1000);
+}
+
+// Play a perfect rendition of `letter` at 50 ms dit / 150 ms dah, then call callback.
+function playMorseLetter(letter, callback) {
+  ensureAudio();
+  const code = MORSE_CODE[letter];
+  if (!code) { setTimeout(callback, 0); return; }
+
+  const DIT = 0.050, DAH = 0.150, GAP = 0.050;
+  const RAMP = 0.005;
+  // Small leading pause so the pip finishes before the rendition starts
+  let t = audioCtx.currentTime + 0.13;
+
+  for (const sym of code) {
+    const dur = sym === '.' ? DIT : DAH;
+    const osc  = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 650;
+    gain.gain.setValueAtTime(0,    t);
+    gain.gain.linearRampToValueAtTime(0.30, t + RAMP);
+    gain.gain.setValueAtTime(0.30, t + dur - RAMP);
+    gain.gain.linearRampToValueAtTime(0,    t + dur);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(t);
+    osc.stop(t + dur + 0.01);
+    t += dur + GAP;
+  }
+
+  // Fire callback just after the last symbol finishes
+  const totalMs = (t - audioCtx.currentTime + 0.05) * 1000;
+  setTimeout(callback, totalMs);
+}
+
 // ── Morse tree ────────────────────────────────────────────────────────────────
 
 function N(letter, dash, dot) { return { letter, dash, dot }; }
@@ -617,16 +685,19 @@ function advanceWordIfDone() {
   if (practiceCharIdx >= word.length) {
     playWordComplete();
     renderPractice();
-    setTimeout(() => {
-      practiceWordIdx++;
-      if (practiceWordIdx >= practiceList.length) {
-        practiceList    = shuffled(PRACTICE_WORDS);
-        practiceWordIdx = 0;
-      }
-      practiceCharIdx = 0;
-      reset();
-      renderPractice();
-    }, 1200);
+    // After the word-complete chime settles, play a perfect rendition of the whole word
+    setTimeout(() => playMorseWord(word, () => {
+      setTimeout(() => {
+        practiceWordIdx++;
+        if (practiceWordIdx >= practiceList.length) {
+          practiceList    = shuffled(PRACTICE_WORDS);
+          practiceWordIdx = 0;
+        }
+        practiceCharIdx = 0;
+        reset();
+        renderPractice();
+      }, 400);
+    }), 350);
     return true;
   }
   return false;
@@ -643,10 +714,8 @@ let keyDown    = false;
 let keyDownAt  = 0;
 let barAnim    = null;
 
-// 150 ms threshold ≈ calibrated for ~8 WPM practice speed
-// (FCC last required 5 WPM; at 5 WPM a dit = 240 ms; 150 ms threshold gives
-//  comfortable headroom while keeping dah feel distinct)
-const DIT_MS   = 150;
+// dit ≈ 50 ms, dah ≈ 150 ms → threshold at midpoint
+const DIT_MS   = 100;
 const RESET_MS = 1500;
 
 const letterEl  = document.getElementById('letter-display');
@@ -687,23 +756,23 @@ function handleTimeout() {
 
   const letter = current.letter;
 
+  // Wrong letter in practice mode → error, no playback
+  if (practiceOn && letter !== currentWord()[practiceCharIdx]) {
+    showError();
+    return;
+  }
+
+  // Flash success and play the confirmation pip
+  letterEl.textContent      = letter;
+  letterEl.style.textShadow = '0 0 50px #00ff9a, 0 0 100px #00cc66';
+  playLetterOk();
+
   if (practiceOn) {
-    const expected = currentWord()[practiceCharIdx];
-    if (letter === expected) {
-      playLetterOk();
-      practiceCharIdx++;
-      letterEl.textContent    = letter;
-      letterEl.style.textShadow = '0 0 50px #00ff9a, 0 0 100px #00cc66';
-      renderPractice();
-      if (!advanceWordIfDone()) {
-        setTimeout(reset, 700);
-      }
-    } else {
-      showError();
-    }
+    practiceCharIdx++;
+    renderPractice();
+    if (!advanceWordIfDone()) setTimeout(reset, 300);
   } else {
-    letterEl.style.textShadow = '0 0 50px #00ff9a, 0 0 100px #00cc66';
-    setTimeout(reset, 1000);
+    setTimeout(reset, 500);
   }
 }
 
