@@ -150,6 +150,24 @@ svg { width: 100%; height: auto; }
   text-align: center;
   line-height: 1.6;
 }
+
+/* ── Replay button ─────────────────────────────────────────── */
+#replay-wrap {
+  display: none;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+#btn-replay {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  padding: 0;
+  font-size: 1.1rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 </style>
 </head>
 <body>
@@ -165,8 +183,13 @@ svg { width: 100%; height: auto; }
 <div id="symbols-display"></div>
 <div id="key-indicator"><div id="key-bar"></div></div>
 
+<div id="replay-wrap">
+  <button id="btn-replay" title="Replay">↺</button>
+</div>
 <div id="controls">
-  <button id="btn-practice">PRACTICE MODE</button>
+  <button id="btn-free" class="active-btn">FREE</button>
+  <button id="btn-sending">SENDING</button>
+  <button id="btn-copying">COPYING</button>
 </div>
 
 <div id="tree-wrap">
@@ -820,6 +843,13 @@ function stopBar() {
 // ── Keyboard ──────────────────────────────────────────────────────────────────
 
 document.addEventListener('keydown', e => {
+  if (copyingOn) {
+    if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) {
+      e.preventDefault();
+      handleCopyInput(e.key.toUpperCase());
+    }
+    return;
+  }
   if (e.code !== 'Space' || keyDown) return;
   e.preventDefault();
   keyDown   = true;
@@ -829,6 +859,7 @@ document.addEventListener('keydown', e => {
 });
 
 document.addEventListener('keyup', e => {
+  if (copyingOn) return;
   if (e.code !== 'Space' || !keyDown) return;
   e.preventDefault();
   keyDown = false;
@@ -841,8 +872,8 @@ document.addEventListener('keyup', e => {
 
 let touchAt = 0;
 document.addEventListener('touchstart', e => {
-  // Ignore taps on buttons
   if (e.target.tagName === 'BUTTON') return;
+  if (copyingOn) return;
   e.preventDefault();
   touchAt = Date.now();
   startKeyTone();
@@ -851,25 +882,364 @@ document.addEventListener('touchstart', e => {
 
 document.addEventListener('touchend', e => {
   if (e.target.tagName === 'BUTTON') return;
+  if (copyingOn) return;
   e.preventDefault();
   stopKeyTone();
   stopBar();
   navigate(Date.now() - touchAt < DIT_MS ? 'dot' : 'dash');
 }, { passive: false });
 
-// ── Practice button ───────────────────────────────────────────────────────────
+// ── Copying mode ──────────────────────────────────────────────────────────────
 
-document.getElementById('btn-practice').addEventListener('click', () => {
-  ensureAudio();
-  practiceOn = !practiceOn;
-  document.getElementById('btn-practice').classList.toggle('active-btn', practiceOn);
-  if (practiceOn) {
+const COPY_SEQUENCE = [
+  'T','E','A','O','N','I','R','S',
+  'H','D','L','U','C',
+  'M','W','F','Y','P','G','B','V',
+  'K','J','X','Q','Z'
+];
+
+const COPY_MIN_ATTEMPTS  = 5;
+const COPY_ACCURACY_GATE = 0.9;
+const COPY_INIT_COUNT    = 3;
+
+let copyingOn              = false;
+let copyInPlay             = [];
+let copyStats              = {};
+let copyPhase              = 'idle';
+let copyCurrentSeq         = '';
+let copyCurrentPos         = 0;
+let copyWrongGuesses       = [];
+let copyIntroIdx           = 0;
+let copyReplayLetter       = null;
+let copyRoundId            = 0;
+let copyTwoLettersUnlocked = false;
+let copyGimme              = null;
+
+function enterCopyingMode() {
+  copyingOn              = true;
+  copyInPlay             = [];
+  copyStats              = {};
+  copyPhase              = 'idle';
+  copyCurrentSeq         = '';
+  copyCurrentPos         = 0;
+  copyWrongGuesses       = [];
+  copyIntroIdx           = 0;
+  copyReplayLetter       = null;
+  copyRoundId            = 0;
+  copyTwoLettersUnlocked = false;
+  copyGimme              = null;
+
+  document.getElementById('tree-wrap').style.display     = 'none';
+  document.getElementById('key-indicator').style.display = 'none';
+  document.getElementById('hint').style.display          = 'none';
+  document.getElementById('replay-wrap').style.display   = 'flex';
+
+  reset();
+  renderCopyRack();
+  introduceNextLetters(COPY_INIT_COUNT, () => startCopyRound());
+}
+
+function exitCopyingMode() {
+  copyingOn = false;
+  copyPhase = 'idle';
+  copyRoundId++;
+
+  document.getElementById('tree-wrap').style.display     = '';
+  document.getElementById('key-indicator').style.display = '';
+  document.getElementById('hint').style.display          = '';
+  document.getElementById('replay-wrap').style.display   = 'none';
+  document.getElementById('practice-label').textContent  = '';
+  document.getElementById('practice-word').innerHTML     = '';
+
+  reset();
+}
+
+function renderCopyRack() {
+  document.getElementById('practice-label').textContent = copyInPlay.length ? 'IN PLAY' : '';
+  document.getElementById('practice-word').innerHTML = copyInPlay
+    .map(ch => `<span class="pc done">${ch}</span>`).join('');
+}
+
+function introduceNextLetters(count, onDone) {
+  if (!copyingOn || count <= 0 || copyIntroIdx >= COPY_SEQUENCE.length) {
+    onDone();
+    return;
+  }
+  const letter = COPY_SEQUENCE[copyIntroIdx++];
+  if (!copyStats[letter]) copyStats[letter] = { correct: 0, attempts: 0 };
+  copyReplayLetter = letter;
+  introduceOneLetter(letter, () => introduceNextLetters(count - 1, onDone));
+}
+
+function introduceOneLetter(letter, onDone) {
+  if (!copyingOn) return;
+  copyPhase = 'introducing';
+
+  showCopyLetter(letter, false, true);
+  playMorseLetter(letter, () => {
+    if (!copyingOn) return;
+    setTimeout(() => {
+      clearCopyWorking();
+      setTimeout(() => {
+        if (!copyingOn) return;
+        showCopyLetter(letter, false, true);
+        playMorseLetter(letter, () => {
+          if (!copyingOn) return;
+          copyInPlay.push(letter);
+          renderCopyRack();
+          setTimeout(onDone, 800);
+        });
+      }, 400);
+    }, 600);
+  });
+}
+
+function showCopyLetter(letter, isError, showMorse) {
+  letterEl.textContent = letter;
+  if (isError) {
+    letterEl.classList.add('error');
+    letterEl.style.textShadow = '';
+  } else {
+    letterEl.classList.remove('error');
+    letterEl.style.textShadow = '0 0 30px #00ff9a, 0 0 60px #00cc66';
+  }
+  symbolsEl.textContent = '';
+  if (showMorse) {
+    const code = MORSE_CODE[letter] || '';
+    symbolsEl.textContent = code.split('').map(s => s === '.' ? '·' : '—').join('\u202f');
+  }
+}
+
+function clearCopyWorking() {
+  letterEl.textContent = '';
+  letterEl.classList.remove('error');
+  letterEl.style.textShadow = '';
+  symbolsEl.textContent = '';
+}
+
+function renderCopyWrongs() {
+  symbolsEl.innerHTML = copyWrongGuesses
+    .map(l => `<span style="color:#ff5555">${l}</span>`)
+    .join('<span style="color:#1f3f2f;padding:0 6px">·</span>');
+}
+
+function playBackSeq(seq, cb) {
+  seq.length === 1 ? playMorseLetter(seq, cb) : playMorseWord(seq, cb);
+}
+
+function pickSeqLength() {
+  if (!copyTwoLettersUnlocked) return 1;
+  return Math.random() < 0.5 ? 1 : 2;
+}
+
+function startCopyRound() {
+  if (!copyingOn || copyInPlay.length === 0) return;
+  copyRoundId++;
+  copyPhase        = 'waiting';
+  copyWrongGuesses = [];
+  copyCurrentPos   = 0;
+
+  let seq;
+  if (copyGimme) {
+    seq = copyGimme;
+    copyGimme = null;
+  } else {
+    const len  = pickSeqLength();
+    const pool = [...copyInPlay].sort(() => Math.random() - 0.5);
+    seq = pool.slice(0, len).join('');
+  }
+
+  copyCurrentSeq   = seq;
+  copyReplayLetter = seq;
+  clearCopyWorking();
+  playBackSeq(seq, () => {});
+}
+
+function handleCopyInput(key) {
+  if (!copyingOn || copyPhase !== 'waiting') return;
+  const rid = copyRoundId;
+  const seq = copyCurrentSeq;
+
+  if (key === seq[copyCurrentPos]) {
+    copyCurrentPos++;
+
+    if (copyCurrentPos < seq.length) {
+      // Correct so far — flash the letter, then go quiet for next keystroke
+      showCopyLetter(key, false, false);
+      setTimeout(() => {
+        if (!copyingOn || copyRoundId !== rid) return;
+        clearCopyWorking();
+      }, 300);
+      return;
+    }
+
+    // Sequence complete
+    copyPhase = 'feedback';
+    seq.split('').forEach(l => { copyStats[l].attempts++; copyStats[l].correct++; });
+    showCopyLetters(seq, false, seq.length === 1);
+    playBackSeq(seq, () => {
+      if (!copyingOn || copyRoundId !== rid) return;
+      clearCopyWorking();
+      setTimeout(() => afterCopyRound(), 800);
+    });
+
+  } else {
+    copyWrongGuesses.push(key);
+    copyCurrentPos = 0;
+    showCopyLetter(key, true, false);
+
+    setTimeout(() => {
+      if (!copyingOn || copyRoundId !== rid) return;
+      clearCopyWorking();
+      renderCopyWrongs();
+
+      if (copyWrongGuesses.length >= 3) {
+        copyPhase = 'feedback';
+        seq.split('').forEach(l => { copyStats[l].attempts++; });
+
+        setTimeout(() => {
+          if (!copyingOn || copyRoundId !== rid) return;
+          showCopyLetters(seq, false, seq.length === 1);
+          playBackSeq(seq, () => {
+            if (!copyingOn || copyRoundId !== rid) return;
+            setTimeout(() => afterCopyRound(), 800);
+          });
+        }, 400);
+
+      } else {
+        setTimeout(() => {
+          if (!copyingOn || copyRoundId !== rid) return;
+          copyPhase = 'waiting';
+          playBackSeq(seq, () => {});
+        }, 300);
+      }
+    }, 500);
+  }
+}
+
+function afterCopyRound() {
+  if (!copyingOn) return;
+  if (!shouldProgressCopy()) { startCopyRound(); return; }
+
+  if (copyIntroIdx < COPY_SEQUENCE.length) {
+    introduceNextLetters(1, () => {
+      if (copyInPlay.length >= 5 && !copyTwoLettersUnlocked) {
+        unlockTwoLetterPhase(() => startCopyRound());
+      } else {
+        startCopyRound();
+      }
+    });
+  } else if (copyInPlay.length >= 5 && !copyTwoLettersUnlocked) {
+    unlockTwoLetterPhase(() => startCopyRound());
+  } else {
+    startCopyRound();
+  }
+}
+
+function unlockTwoLetterPhase(onDone) {
+  copyTwoLettersUnlocked = true;
+  const pool = [...copyInPlay].sort(() => Math.random() - 0.5);
+  const seq  = pool[0] + pool[1];
+  copyGimme  = seq;
+  introduceTwoLetterSequence(seq, onDone);
+}
+
+function introduceTwoLetterSequence(seq, onDone) {
+  if (!copyingOn) return;
+  copyPhase        = 'introducing';
+  copyReplayLetter = seq;
+
+  showCopyLetters(seq, false, true);
+  playMorseWord(seq, () => {
+    if (!copyingOn) return;
+    setTimeout(() => {
+      clearCopyWorking();
+      setTimeout(() => {
+        if (!copyingOn) return;
+        showCopyLetters(seq, false, true);
+        playMorseWord(seq, () => {
+          if (!copyingOn) return;
+          setTimeout(onDone, 800);
+        });
+      }, 400);
+    }, 600);
+  });
+}
+
+function showCopyLetters(letters, isError, showMorse) {
+  letterEl.textContent = letters;
+  if (isError) {
+    letterEl.classList.add('error');
+    letterEl.style.textShadow = '';
+  } else {
+    letterEl.classList.remove('error');
+    letterEl.style.textShadow = '0 0 30px #00ff9a, 0 0 60px #00cc66';
+  }
+  symbolsEl.textContent = '';
+  if (showMorse) {
+    const parts = letters.split('').map(l => {
+      const code = MORSE_CODE[l] || '';
+      return code.split('').map(s => s === '.' ? '·' : '—').join('\u202f');
+    });
+    symbolsEl.textContent = parts.join('   ');
+  }
+}
+
+function shouldProgressCopy() {
+  for (const letter of copyInPlay) {
+    const s = copyStats[letter];
+    if (!s || s.attempts < COPY_MIN_ATTEMPTS) return false;
+    if (s.correct / s.attempts < COPY_ACCURACY_GATE) return false;
+  }
+  return true;
+}
+
+// ── Mode buttons ──────────────────────────────────────────────────────────────
+
+let activeMode = 'free';
+
+function setMode(mode) {
+  if (activeMode === 'sending') {
+    practiceOn = false;
+    renderPractice();
+  } else if (activeMode === 'copying') {
+    exitCopyingMode();
+  }
+
+  activeMode = (activeMode === mode) ? 'free' : mode;
+
+  document.getElementById('btn-free').classList.toggle('active-btn',    activeMode === 'free');
+  document.getElementById('btn-sending').classList.toggle('active-btn', activeMode === 'sending');
+  document.getElementById('btn-copying').classList.toggle('active-btn', activeMode === 'copying');
+
+  if (activeMode === 'sending') {
+    ensureAudio();
+    practiceOn      = true;
     practiceList    = shuffled(PRACTICE_WORDS);
     practiceWordIdx = 0;
     practiceCharIdx = 0;
+    reset();
+    renderPractice();
+  } else if (activeMode === 'copying') {
+    ensureAudio();
+    enterCopyingMode();
+  } else {
+    reset();
   }
-  reset();
-  renderPractice();
+}
+
+document.getElementById('btn-free').addEventListener('click',    () => setMode('free'));
+document.getElementById('btn-sending').addEventListener('click', () => setMode('sending'));
+document.getElementById('btn-copying').addEventListener('click', () => setMode('copying'));
+
+document.getElementById('btn-replay').addEventListener('click', () => {
+  if (!copyReplayLetter) return;
+  ensureAudio();
+  if (copyReplayLetter.length === 1) {
+    playMorseLetter(copyReplayLetter, () => {});
+  } else {
+    playMorseWord(copyReplayLetter, () => {});
+  }
 });
 
 // ── Init ──────────────────────────────────────────────────────────────────────
