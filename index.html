@@ -63,6 +63,7 @@ header {
   background: #0a2416;
   box-shadow: 0 0 8px #00eb7560;
 }
+.pc.done.dim { filter: brightness(0.4); }
 .pc.current {
   color: #00eb75;
   border-color: #00eb75;
@@ -78,10 +79,11 @@ header {
 /* ── Letter + symbols ──────────────────────────────────────── */
 #letter-display {
   font-size: 5rem;
+  line-height: 1;
   font-weight: bold;
   color: #00ff9a;
   text-shadow: 0 0 30px #00ff9a, 0 0 60px #00cc66;
-  min-height: 80px;
+  height: 80px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -168,6 +170,91 @@ svg { width: 100%; height: auto; }
   align-items: center;
   justify-content: center;
 }
+
+/* ── Copying help drawer ─────────────────────────────────── */
+#copy-help {
+  display: none;
+  width: 100%;
+  max-width: 480px;
+  margin: 2px 0 10px;
+}
+#copy-help-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid #00eb7528;
+  cursor: pointer;
+  font-size: 0.65rem;
+  letter-spacing: 0.25em;
+  color: #2a5038;
+  transition: color 0.15s, border-color 0.15s;
+}
+#copy-help-header:hover { color: #3a7050; border-color: #00eb7550; }
+#copy-help-arrow {
+  font-size: 0.55rem;
+  color: #00eb7560;
+  transition: transform 0.2s;
+  display: inline-block;
+}
+#copy-help.open #copy-help-arrow { transform: rotate(90deg); }
+#copy-help-body {
+  display: none;
+  padding: 12px 2px 6px;
+  font-size: 0.72rem;
+  color: #3a6050;
+  line-height: 1.75;
+}
+#copy-help.open #copy-help-body { display: block; }
+#copy-progress {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.cp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cp-letter {
+  width: 26px; height: 26px;
+  border: 1.5px solid #00eb75;
+  border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1rem; font-weight: bold;
+  color: #00eb75;
+  background: #0a2416;
+  flex-shrink: 0;
+}
+.cp-track {
+  flex: 1;
+  position: relative;
+  height: 7px;
+  background: #091408;
+  border: 1px solid #162a1c;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.cp-fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  background: #00eb7548;
+  transition: width 0.5s ease;
+}
+.cp-tick {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 1px;
+  background: rgba(0, 235, 117, 0.16);
+}
+.cp-gate {
+  position: absolute;
+  left: 90%;
+  top: 0; bottom: 0;
+  width: 2px;
+  background: rgba(0, 235, 117, 0.52);
+}
 </style>
 </head>
 <body>
@@ -190,6 +277,22 @@ svg { width: 100%; height: auto; }
   <button id="btn-free" class="active-btn">FREE</button>
   <button id="btn-sending">SENDING</button>
   <button id="btn-copying">COPYING</button>
+</div>
+
+<div id="copy-help">
+  <div id="copy-help-header" onclick="toggleCopyHelp()">
+    <span id="copy-help-arrow">▶</span>
+    <span>INSTRUCTIONS</span>
+  </div>
+  <div id="copy-help-body">
+    <p>A sequence is played — press the matching letter key(s) to identify it.</p>
+    <p>Once every letter in play reaches at least five correct answers and 90% accuracy,
+    the next letter is added. Two-letter sequences are introduced after 5 letters are
+    learned, three letter sequences after 8 letters are learned, and real words and ham
+    shorthand are introduced gradually at each stage from 12 letters onward.</p>
+    <p>↺ replays the last sequence at any time.</p>
+    <div id="copy-progress"></div>
+  </div>
 </div>
 
 <div id="tree-wrap">
@@ -312,6 +415,25 @@ function playLetterOk() {
   gain.connect(audioCtx.destination);
   osc.start(now);
   osc.stop(now + 0.10);
+}
+
+function playStageClear() {
+  ensureAudio();
+  const now = audioCtx.currentTime;
+  [520, 660, 830, 1040].forEach((freq, i) => {
+    const osc  = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    const t = now + i * 0.11;
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.20, t + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(t);
+    osc.stop(t + 0.24);
+  });
 }
 
 const MORSE_CODE = {
@@ -844,6 +966,11 @@ function stopBar() {
 
 document.addEventListener('keydown', e => {
   if (copyingOn) {
+    if (e.ctrlKey && e.key === 'n') {
+      e.preventDefault();
+      debugProgressCopy();
+      return;
+    }
     if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) {
       e.preventDefault();
       handleCopyInput(e.key.toUpperCase());
@@ -898,9 +1025,50 @@ const COPY_SEQUENCE = [
   'K','J','X','Q','Z'
 ];
 
-const COPY_MIN_ATTEMPTS  = 5;
-const COPY_ACCURACY_GATE = 0.9;
-const COPY_INIT_COUNT    = 3;
+const COPY_MIN_ATTEMPTS      = 5;
+const COPY_ACCURACY_GATE     = 0.9;
+const COPY_INIT_COUNT        = 3;
+const COPY_THREE_LETTER_AT   = 8;
+const COPY_FOUR_LETTER_AT    = 12;
+const COPY_FIVE_LETTER_AT    = 16;
+const COPY_STAGE_CLEAR_PAUSE = 2400;
+const COPY_POST_INTRO_PAUSE  = 1600;
+
+// Words filtered at runtime to only those using letters currently in play.
+// Includes common English words and ham radio abbreviations/NATO phonetics.
+const COPY_WORD_LIST = [
+  // 3-letter — common words + ham abbreviations
+  'ANT','NET','SET','TEN','ONE','SEA','EAR','OAR','ORE','TAN',
+  'RAN','SON','TON','TIN','SIN','OAT','ATE','IRE','TOE','ROT',
+  'NOT','ION','SIT','NIT','TEA','ETA','AIR','HIT','HID','HEN',
+  'SHE','HER','DEN','DIN','LID','OIL','RUN','SUN','DUE','HUE',
+  'NUT','HUT','RUT','NUN','NIL','SRI','HRD',
+  // Q signals — filtered until Q is in play
+  'QRM','QRN','QRO','QRP','QRS','QRT','QSB','QSL','QSO','QSY','QTH','QRZ',
+  // 4-letter — ham/radio context + common words
+  'TUNE','SEND','LOAD','UNIT','DIAL','TONE','LINE','HOLD','ROAD',
+  'LURE','RUIN','DUNE','SOUL','LOUD','DONE','HIDE','SIDE','RIDE',
+  'TIDE','HIRE','TIRE','SOLE','HOLE','ROLE','THIN','THEN','SHIN',
+  'THIS','SHED','SLED','LEND','REND','TEND','NOTE','NOSE','HOSE',
+  'ROSE','DOSE','LOSE','HURL','DOTE','REIN','DIRE','SIRE','LORE',
+  'TORE','WORE','SORE','BORE','MILD','RIND','HIND','FIND','WIND',
+  'MIND','BIND','NODE','MODE','RODE','DUEL','DELI','RUNE','LEAN',
+  'DEAN','MEAN','ROAN','LOAN','TOAD','SOIL','HILL','FILL','WILL',
+  'TILL','TELL','SELL','WELL','SOLD','TOLD','BOLD','COLD','FOLD',
+  'ECHO','LIMA',                          // NATO phonetics
+  'CALL','WIRE','WELD','SENT','HEAR',     // ham context
+  // 5-letter — NATO phonetics, ham terms, common words
+  'DELTA','HOTEL','INDIA','NORTH','SOUTH', // NATO / directions
+  'OSCAR','ROMEO','MORSE',                 // NATO / ham
+  'RADIO','AUDIO','NOISE','STORE','SCORE','WORLD','STORM','WORDS',
+  'FORMS','THORN','SHORE','THOSE','SHONE','STONE','WHOLE','WHILE',
+  'WRIST','FROWN','CROWN','CLOWN','UNCLE','MICRO','THEIR','THERE',
+  'THEME','SHIFT','SWIFT','DRIFT','SHORT','SHIRT','SWORE','SWORN',
+  'DROWN','SCORN','NOTES','TONES','RIDES','HIDES','LINES','HOLDS',
+  'STOLE','IRONS','SIREN','RINSE','REINS','INTER','STERN','SNORE',
+  'SNORT','TRAIN','AROSE','STARE','RATES','TEARS','RAISE','ARISE',
+  'IRATE','EARNS','NEARS','INTRO','INERT',
+];
 
 let copyingOn              = false;
 let copyInPlay             = [];
@@ -908,12 +1076,40 @@ let copyStats              = {};
 let copyPhase              = 'idle';
 let copyCurrentSeq         = '';
 let copyCurrentPos         = 0;
+let copyTypedSoFar         = '';
 let copyWrongGuesses       = [];
 let copyIntroIdx           = 0;
 let copyReplayLetter       = null;
 let copyRoundId            = 0;
 let copyTwoLettersUnlocked = false;
 let copyGimme              = null;
+
+function toggleCopyHelp() {
+  document.getElementById('copy-help').classList.toggle('open');
+  renderCopyProgress();
+}
+
+function renderCopyProgress() {
+  const el = document.getElementById('copy-progress');
+  if (!el) return;
+  el.innerHTML = copyInPlay.map(letter => {
+    const s   = copyStats[letter] || { correct: 0, attempts: 0 };
+    const pct = s.attempts < COPY_MIN_ATTEMPTS
+      ? (s.correct / COPY_MIN_ATTEMPTS) * 100
+      : Math.min(s.correct / s.attempts, 1) * 100;
+    const ticks = [20, 40, 60, 80].map(t =>
+      `<div class="cp-tick" style="left:${t}%"></div>`
+    ).join('');
+    return `<div class="cp-row">
+      <div class="cp-letter">${letter}</div>
+      <div class="cp-track">
+        <div class="cp-fill" style="width:${pct.toFixed(1)}%"></div>
+        ${ticks}
+        <div class="cp-gate"></div>
+      </div>
+    </div>`;
+  }).join('');
+}
 
 function enterCopyingMode() {
   copyingOn              = true;
@@ -922,6 +1118,7 @@ function enterCopyingMode() {
   copyPhase              = 'idle';
   copyCurrentSeq         = '';
   copyCurrentPos         = 0;
+  copyTypedSoFar         = '';
   copyWrongGuesses       = [];
   copyIntroIdx           = 0;
   copyReplayLetter       = null;
@@ -933,10 +1130,16 @@ function enterCopyingMode() {
   document.getElementById('key-indicator').style.display = 'none';
   document.getElementById('hint').style.display          = 'none';
   document.getElementById('replay-wrap').style.display   = 'flex';
+  document.getElementById('copy-help').style.display     = 'block';
+  document.getElementById('copy-help').classList.remove('open');
+  renderCopyProgress();
 
   reset();
   renderCopyRack();
-  introduceNextLetters(COPY_INIT_COUNT, () => startCopyRound());
+  introduceNextLetters(COPY_INIT_COUNT, () => {
+    copyPhase = 'idle'; renderCopyRack();
+    setTimeout(() => startCopyRound(), COPY_POST_INTRO_PAUSE);
+  });
 }
 
 function exitCopyingMode() {
@@ -948,16 +1151,20 @@ function exitCopyingMode() {
   document.getElementById('key-indicator').style.display = '';
   document.getElementById('hint').style.display          = '';
   document.getElementById('replay-wrap').style.display   = 'none';
+  document.getElementById('copy-help').style.display     = 'none';
+  document.getElementById('copy-help').classList.remove('open');
   document.getElementById('practice-label').textContent  = '';
   document.getElementById('practice-word').innerHTML     = '';
 
   reset();
 }
 
-function renderCopyRack() {
+function renderCopyRack(newLetter = null) {
+  const dimming = copyPhase === 'introducing';
   document.getElementById('practice-label').textContent = copyInPlay.length ? 'IN PLAY' : '';
   document.getElementById('practice-word').innerHTML = copyInPlay
-    .map(ch => `<span class="pc done">${ch}</span>`).join('');
+    .map(ch => `<span class="pc done${dimming && ch !== newLetter ? ' dim' : ''}">${ch}</span>`)
+    .join('');
 }
 
 function introduceNextLetters(count, onDone) {
@@ -975,6 +1182,11 @@ function introduceOneLetter(letter, onDone) {
   if (!copyingOn) return;
   copyPhase = 'introducing';
 
+  // Show new letter in rack immediately — full brightness, existing letters dimmed
+  copyInPlay.push(letter);
+  renderCopyRack(letter);
+  renderCopyProgress();
+
   showCopyLetter(letter, false, true);
   playMorseLetter(letter, () => {
     if (!copyingOn) return;
@@ -985,8 +1197,9 @@ function introduceOneLetter(letter, onDone) {
         showCopyLetter(letter, false, true);
         playMorseLetter(letter, () => {
           if (!copyingOn) return;
-          copyInPlay.push(letter);
-          renderCopyRack();
+          // Clear working area; rack stays dimmed until interstitial ends
+          clearCopyWorking();
+          renderCopyRack(letter);
           setTimeout(onDone, 800);
         });
       }, 400);
@@ -1027,9 +1240,51 @@ function playBackSeq(seq, cb) {
   seq.length === 1 ? playMorseLetter(seq, cb) : playMorseWord(seq, cb);
 }
 
-function pickSeqLength() {
-  if (!copyTwoLettersUnlocked) return 1;
-  return Math.random() < 0.5 ? 1 : 2;
+function maxSeqLen() {
+  const n = copyInPlay.length;
+  return n >= COPY_FIVE_LETTER_AT  ? 5
+       : n >= COPY_FOUR_LETTER_AT  ? 4
+       : n >= COPY_THREE_LETTER_AT ? 3
+       : copyTwoLettersUnlocked    ? 2 : 1;
+}
+
+function pickSeqLength(max) {
+  const r = Math.random();
+  if (max <= 1) return 1;
+  if (max === 2) return r < 0.5  ? 1 : 2;
+  if (max === 3) return r < 0.25 ? 1 : r < 0.5  ? 2 : 3;
+  if (max === 4) return r < 0.15 ? 1 : r < 0.30 ? 2 : r < 0.55 ? 3 : 4;
+  return             r < 0.10 ? 1 : r < 0.20 ? 2 : r < 0.35 ? 3 : r < 0.62 ? 4 : 5;
+}
+
+function pickWord(targetLen) {
+  const available = new Set(copyInPlay);
+  const pool = COPY_WORD_LIST.filter(w =>
+    (targetLen === null || w.length === targetLen) &&
+    [...w].every(c => available.has(c))
+  );
+  return pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
+}
+
+function pickNextSeq() {
+  const max = maxSeqLen();
+
+  if (max >= 4) {
+    if (Math.random() < 0.78) {
+      const preferLen = (max === 5 && Math.random() < 0.45) ? 4 : max;
+      return pickWord(preferLen) ?? pickWord(null) ?? randomSeq(max);
+    }
+  } else if (max === 3 && Math.random() < 0.45) {
+    return pickWord(3) ?? randomSeq(max);
+  }
+
+  return randomSeq(max);
+}
+
+function randomSeq(max) {
+  const len  = pickSeqLength(max);
+  const pool = [...copyInPlay].sort(() => Math.random() - 0.5);
+  return pool.slice(0, len).join('');
 }
 
 function startCopyRound() {
@@ -1038,15 +1293,14 @@ function startCopyRound() {
   copyPhase        = 'waiting';
   copyWrongGuesses = [];
   copyCurrentPos   = 0;
+  copyTypedSoFar   = '';
 
   let seq;
   if (copyGimme) {
     seq = copyGimme;
     copyGimme = null;
   } else {
-    const len  = pickSeqLength();
-    const pool = [...copyInPlay].sort(() => Math.random() - 0.5);
-    seq = pool.slice(0, len).join('');
+    seq = pickNextSeq();
   }
 
   copyCurrentSeq   = seq;
@@ -1062,14 +1316,14 @@ function handleCopyInput(key) {
 
   if (key === seq[copyCurrentPos]) {
     copyCurrentPos++;
+    copyTypedSoFar += key;
 
     if (copyCurrentPos < seq.length) {
-      // Correct so far — flash the letter, then go quiet for next keystroke
-      showCopyLetter(key, false, false);
-      setTimeout(() => {
-        if (!copyingOn || copyRoundId !== rid) return;
-        clearCopyWorking();
-      }, 300);
+      // Partial match — keep typed letters visible, wait for next keystroke
+      letterEl.textContent = copyTypedSoFar;
+      letterEl.classList.remove('error');
+      letterEl.style.textShadow = '0 0 30px #00ff9a, 0 0 60px #00cc66';
+      symbolsEl.textContent = '';
       return;
     }
 
@@ -1084,9 +1338,11 @@ function handleCopyInput(key) {
     });
 
   } else {
-    copyWrongGuesses.push(key);
-    copyCurrentPos = 0;
-    showCopyLetter(key, true, false);
+    const wrongGuess   = copyTypedSoFar + key;
+    copyTypedSoFar     = '';
+    copyCurrentPos     = 0;
+    copyWrongGuesses.push(wrongGuess);
+    showCopyLetters(wrongGuess, true, false);
 
     setTimeout(() => {
       if (!copyingOn || copyRoundId !== rid) return;
@@ -1119,21 +1375,45 @@ function handleCopyInput(key) {
 
 function afterCopyRound() {
   if (!copyingOn) return;
+  renderCopyProgress();
   if (!shouldProgressCopy()) { startCopyRound(); return; }
 
-  if (copyIntroIdx < COPY_SEQUENCE.length) {
-    introduceNextLetters(1, () => {
-      if (copyInPlay.length >= 5 && !copyTwoLettersUnlocked) {
-        unlockTwoLetterPhase(() => startCopyRound());
-      } else {
-        startCopyRound();
-      }
-    });
-  } else if (copyInPlay.length >= 5 && !copyTwoLettersUnlocked) {
-    unlockTwoLetterPhase(() => startCopyRound());
-  } else {
-    startCopyRound();
-  }
+  playStageClear();
+  const rid = copyRoundId;
+  setTimeout(() => {
+    if (!copyingOn || copyRoundId !== rid) return;
+    if (copyIntroIdx < COPY_SEQUENCE.length) {
+      introduceNextLetters(1, () => {
+        if (copyInPlay.length >= 5 && !copyTwoLettersUnlocked) {
+          unlockTwoLetterPhase(() => {
+            copyPhase = 'idle'; renderCopyRack();
+            setTimeout(() => startCopyRound(), COPY_POST_INTRO_PAUSE);
+          });
+        } else {
+          copyPhase = 'idle'; renderCopyRack();
+          setTimeout(() => startCopyRound(), COPY_POST_INTRO_PAUSE);
+        }
+      });
+    } else if (copyInPlay.length >= 5 && !copyTwoLettersUnlocked) {
+      unlockTwoLetterPhase(() => {
+        copyPhase = 'idle'; renderCopyRack();
+        setTimeout(() => startCopyRound(), COPY_POST_INTRO_PAUSE);
+      });
+    } else {
+      startCopyRound();
+    }
+  }, COPY_STAGE_CLEAR_PAUSE);
+}
+
+function debugProgressCopy() {
+  if (!copyingOn) return;
+  copyInPlay.forEach(l => {
+    if (!copyStats[l]) copyStats[l] = { correct: 0, attempts: 0 };
+    copyStats[l].correct  = Math.max(copyStats[l].correct,  COPY_MIN_ATTEMPTS);
+    copyStats[l].attempts = Math.max(copyStats[l].attempts, COPY_MIN_ATTEMPTS);
+  });
+  copyRoundId++;
+  afterCopyRound();
 }
 
 function unlockTwoLetterPhase(onDone) {
@@ -1149,6 +1429,8 @@ function introduceTwoLetterSequence(seq, onDone) {
   copyPhase        = 'introducing';
   copyReplayLetter = seq;
 
+  renderCopyRack();  // Dim all — no new letter being added
+
   showCopyLetters(seq, false, true);
   playMorseWord(seq, () => {
     if (!copyingOn) return;
@@ -1159,6 +1441,7 @@ function introduceTwoLetterSequence(seq, onDone) {
         showCopyLetters(seq, false, true);
         playMorseWord(seq, () => {
           if (!copyingOn) return;
+          clearCopyWorking();
           setTimeout(onDone, 800);
         });
       }, 400);
